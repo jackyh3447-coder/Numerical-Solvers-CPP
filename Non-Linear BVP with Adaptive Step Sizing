@@ -1,0 +1,677 @@
+///////////////////////////////////////////////////////////////////////////
+//                                                                       //
+//                      C++ Starter Code for Pset 6                      //
+//                     ENAS 4041/MENG 4041/MENG 5041                     //
+//                                                                       //
+// The main purpose of this code is to set up the overall framework for  //
+// solving a nonlinear BVP using finite differences and adaptive grids.  //
+// Details of the actual algorithm have been omitted, and some steps     //
+// aren't even given as comments.  For example, you'll need to insert    //
+// code to keep track of the number of Newton iterations, check whether  //
+// the maximum number of Newton iterations has been exceeded, and        //
+// populate the coefficient matrix and RHS vector for the linear system. //
+// You'll also need to handle several aspects of adapting the grid, such //
+// as computing the equidistribution constant, determining where to add  //
+// new points, actually adding those points, and interpolating the       //
+// previously converged solution to the new grid.  Moreover, some        //
+// variables have been set to random numbers.  Some print statements are //
+// missing.                                                              //
+//                                                                       //
+// NOTE:  You'll primarily be adding code to the main program, the       //
+//        newton function, and the evaluateGrid function.                //
+//                                                                       //
+// AN IMPORTANT NOTE ABOUT ARRAYS:                                       //
+//                                                                       //
+// There are only eight arrays (i.e., vectors or matrices) in this code. //
+// Please don't insert any additional ones!  The reasons are the same as //
+// those given in the starter code for Pset 2.                           //
+//                                                                       //
+// Please take time to read the code thoroughly before modifying it.     //
+//                                                                       //
+// Developed by Beth Bennett for ENAS 4041/MENG 4041/MENG 5041.          //
+//                                                                       //
+///////////////////////////////////////////////////////////////////////////
+
+// Don't forget to include these useful header files.
+#include <iostream>
+#include <iomanip>
+#include <fstream>
+#include <cstdlib>
+#include <cmath>
+
+using namespace std;
+
+// Define Nmax, the maximum allowable value of N.
+#define Nmax 1000
+#define Np1max Nmax+1
+
+// Declare user-defined functions that are defined later.
+void newton(ofstream *ptr_outputFile, ofstream *ptr_plotFile,
+            double a, double b, double alpha, double beta,
+            int gridnum, int N, double x[], double dx[], double w[], 
+            double subdiag[], double maindiag[], double superdiag[], double RHSthendeltaw[],
+            double epsilon, int ellmax, int *success);
+void LUdecomp(int N, double dt[], double eu[], double fv[]);
+void FsolveBsolve(int N, double dt[], double eu[], double fv[], double byw[]);
+double twonorm(double v[], int indbeg, int indend);
+void printSoln(ofstream *ptr_outputFile, ofstream *ptr_plotFile, 
+               int gridnum, int N, double x[], double dx[], double w[]);
+double y(double x);
+void evaluateGrid(int N, double dx[], double w[], double Ciip1[], 
+                  double *Cequi, double *checkgrid, double epsgrid, int *NptsToAdd);
+
+int main()
+{
+    // Declare some variables.
+    // You'll definitely need to declare more variables, but don't declare any more arrays.
+    int i, N, Np1, NptsToAdd;
+    int ellmax, gridnum, success;
+    double a, b, alpha, beta;
+    double h, epsilon, epsgrid, checkgrid, Cequi;
+    double dxmin;
+    double x[Np1max], dx[Np1max], w[Np1max], Ciip1[Np1max];
+    double subdiag[Np1max], maindiag[Np1max], superdiag[Np1max], RHSthendeltaw[Np1max];
+
+    // Open an output file and a plotting data file.
+    ofstream outputFile, plotFile;
+    outputFile.open("CPP_output_ENAS4041_pset06.txt");
+    plotFile.open("CPP_plotting_data_ENAS4041_pset06.txt");
+
+    // Print title to the screen, to the output file, and to the plotting data file.
+    cout       << "\n OUTPUT FROM CPP_starter_ENAS4041_pset06.cpp\n\n";
+    outputFile << "\n OUTPUT FROM CPP_starter_ENAS4041_pset06.cpp\n\n";
+
+    //====================================================================================
+    //
+    // Step 1.  Set up the problem and get input from the user.
+    //
+    //====================================================================================
+
+    // Initialize some variables.
+    a = 0.0;                         // x value at left boundary
+    b = 1.0;                         // x value at right boundary
+    alpha = tanh(-5.0);              // y value at left boundary
+    beta = tanh(5.0);                // y value at right boundary
+    ellmax = 100;                    // Maximum allowed number of iterations for Newton's Method
+    epsilon = 1.e-5;                 // Tolerance for Newton's Method
+    gridnum = 0;                     // Grid number (e.g., gridnum=0 for the initial grid)
+    epsgrid = 0.05;                  // Tolerance for the adaptive gridding process
+
+    cout << " Please input the value of h.\n";
+    cin >> h;                        // Approximate desired grid spacing
+    N = (int) floor((b-a)/h + 0.1);  // Total number of subintervals in the grid
+    h = (b-a)/N;                     // Actual grid spacing
+    Np1 = N+1;
+
+    if (N>Nmax)
+    {
+        cout << " Need to increase Nmax in the code.  Stopping...\n";
+        return 0;
+    }
+
+    // Populate the x and dx vectors.  Also set the initial guess for the w vector.
+    for (i=0; i<=N-1; i++)
+    {
+        x[i] = h*i + a;
+        dx[i] = h;
+        w[i] = (((beta - alpha)/(b - a)) * x[i]) + alpha;
+    }
+    x[N] = b;
+    dx[N] = 0.0;  // There will be one fewer dx value, compared to the number of x values.
+    w[N] = beta;
+
+    // To the screen and to the output file, print the name of the method, information about
+    // the problem being solved, and the values of h, epsilon, and epsgrid.
+    cout       << fixed << setprecision(7);
+    outputFile << fixed << setprecision(7);
+    cout       << "\n";  // Output a blank line.
+    cout       << " Using Second-Order Centered Finite Differences and Newton's Method\n"
+               << " to solve a 2nd-order nonlinear BVP on an adaptive grid\n"
+               << " from x = " << setw(11) << a << " to x = " << setw(11) << b << endl
+               << " (initial grid's h = " << setw(9) << h 
+               << ", epsilon = " << setw(9) << epsilon
+               << ", epsgrid = " << setw(9) << epsgrid << ")\n\n";
+    outputFile << " Using Second-Order Centered Finite Differences and Newton's Method\n"
+               << " to solve a 2nd-order nonlinear BVP on an adaptive grid\n"
+               << " from x = " << setw(11) << a << " to x = " << setw(11) << b << endl
+               << " (initial grid's h = " << setw(9) << h 
+               << ", epsilon = " << setw(9) << epsilon
+               << ", epsgrid = " << setw(9) << epsgrid << ")\n\n";
+    cout       << scientific;
+    outputFile << scientific;
+
+    //====================================================================================
+    //
+    // Step 2.  On the initial grid, discretize the BVP using finite differences, and
+    //          solve the resulting nonlinear algebraic system using Newton's Method.
+    //
+    //====================================================================================
+
+    cout << endl << "On Grid " << setw(2) << gridnum << ", there are the following number of points: " << setw(3) << N + 1 << endl;
+    cout << "The smallest spacing is " << setw(5) << h << " with equivalent # of points: " << setw(5) << 1 / h << endl;
+
+    outputFile << endl << "On Grid " << setw(2) << gridnum << ", there are the following number of points: " << setw(3) << N + 1 << endl;
+    outputFile << "The smallest spacing is " << setw(5) << h << " with equivalent # of points: " << setw(5) << floor((1 / h) + 1) << endl;
+
+    newton(&outputFile, &plotFile, a, b, alpha, beta, gridnum, N, x, dx, w,
+           subdiag, maindiag, superdiag, RHSthendeltaw, epsilon, ellmax, &success);
+    if (success != 1)
+    {
+        // Close the output file and the plotting data file, and terminate the code.
+        outputFile.close();
+        plotFile.close();
+        return 1;
+    }
+
+    //====================================================================================
+    //
+    // Step 3.  Evaluate the grid in preparation for adapting the grid.
+    //
+    //====================================================================================
+
+    evaluateGrid(N, dx, w, Ciip1, &Cequi, &checkgrid, epsgrid, &NptsToAdd);
+
+    //====================================================================================
+    //
+    // Step 4.  While certain conditions are met, adapt the grid.
+    //          On each new grid, discretize the BVP and solve using Newton's Method.
+    //
+    //====================================================================================
+
+    // Start the adaptive gridding loop here.  Because you won't know ahead of time how many grids
+    // will need to be generated before reaching a "good enough" grid, you'll need to replace the
+    // 'for' loop with a 'while' loop.
+
+    for (gridnum=1; gridnum<15; gridnum++)
+    {
+        // Loop through the grid backwards, adding points and interpolating the numerical solution
+        // to the new grid.  In this loop, you'll update entries in x, dx, and w.
+
+        for (i = N-1; i >= 0; i--)
+            {
+                if (Ciip1[i] > (1+epsgrid)* Cequi)
+                    {
+                        for (int j = N-1; j >= i; j--) 
+                            {
+                                x[j + 2] = x[j + 1];
+                                w[j + 2] = w[j + 1];
+                            }
+                        x[i + 1] = (x[i+2] + x[i]) / 2;
+                        w[i + 1] = (w[i+2] + w[i]) / 2;
+                        N++;
+                    }
+            }
+
+        // Now that the new grid has been created, update the value of N and the value of gridnum.
+
+        // Determine the minimum spacing in the new grid (dxmin).
+        dxmin = b - a;
+        for (i = 0; i <= N-1; i++)
+            {
+                dx[i] = x[i+1] - x[i];
+                if (dxmin > dx[i])
+                    {dxmin = dx[i];}
+            }
+
+        // To the screen and to the output file, print the number of points in the new grid
+        // and the minimum spacing.  Also print the number of points that would have been present
+        // in an equivalent equispaced grid.
+
+        int equipoints = floor((1/dxmin) + 0.1) + 1;
+
+        cout << endl << "On Grid " << setw(2) << gridnum << ", there are the following number of points: " << setw(3) << N + 1 << endl;
+        cout << "The smallest spacing is " << setw(5) << dxmin << " with equivalent # of points: " << setw(5) << equipoints << endl;
+
+        outputFile << endl << "On Grid " << setw(2) << gridnum << ", there are the following number of points: " << setw(3) << N + 1 << endl;
+        outputFile << "The smallest spacing is " << setw(5) << dxmin << " with equivalent # of points: " << setw(5) << equipoints << endl;
+
+        // Discretize the BVP using finite differences, and solve the resulting nonlinear 
+        // algebraic system using Newton's Method.
+        newton(&outputFile, &plotFile, a, b, alpha, beta, gridnum, N, x, dx, w,
+               subdiag, maindiag, superdiag, RHSthendeltaw, epsilon, ellmax, &success);
+        if (success != 1)
+        {
+            // Close the output file and the plotting data file, and terminate the code.
+            outputFile.close();
+            plotFile.close();
+            return 1;
+        }
+
+        // Evaluate the grid in preparation for adapting the grid.
+        evaluateGrid(N, dx, w, Ciip1, &Cequi, &checkgrid, epsgrid, &NptsToAdd);
+
+        if (N + NptsToAdd > Nmax)
+        {
+        cout << endl << "You need to increase NMax! Current N: " << N + NptsToAdd << 
+                        "   Stopping before next grid exceeds NMax Points..." << endl;
+
+        outputFile << endl << "You need to increase NMax! Current N: " << N + NptsToAdd << 
+                        "   Stopping before next grid exceeds NMax Points..." << endl;
+        return 1;
+        }
+    }
+
+    //====================================================================================
+    //
+    // Step 5.  If the adaptive gridding process was successful, let the user know.
+    //          Otherwise, print a warning that the maximum number of grid points was 
+    //          exceeded and that the most recently printed solution was obtained on the 
+    //          last grid that didn't exceed Np1max points.
+    //
+    //====================================================================================
+
+
+
+    // Close the output file and the plotting data file.
+    outputFile.close();
+    plotFile.close();
+
+    return 0;
+}
+
+void newton(ofstream *ptr_outputFile, ofstream *ptr_plotFile,
+            double a, double b, double alpha, double beta,
+            int gridnum, int N, double x[], double dx[], double w[], 
+            double subdiag[], double maindiag[], double superdiag[], double RHSthendeltaw[],
+            double epsilon, int ellmax, int *success)
+
+///////////////////////////////////////////////////////////////////////////
+//                                                                       //
+// Given a grid (x) and an initial guess (w) for the numerical solution, //
+// discretize the BVP and use Newton's Method to find a converged        //
+// solution.  Variables in the arg list have the following meanings.     //
+//                                                                       //
+// ptr_outputFile:        Pointer to the output file  (input)            //
+// ptr_plotFile:          Pointer to the plotting data file  (input)     //
+// a:                     x value at left boundary  (input)              //
+// b:                     x value at right boundary  (input)             //
+// alpha:                 y value at left boundary  (input)              //
+// beta:                  y value at right boundary  (input)             //
+// gridnum:               Grid number  (input)                           //
+// N:                     One less than the size of the system  (input)  //
+// x:                     Entries 0:N are the grid pt locations (input)  //
+// dx:                    Entries 0:N-1 are the grid spacings  (input)   //
+// w:                     Entries 0:N are the initial guess  (input)     //
+//                        Entries 0:N are the converged soln  (output)   //
+// subdiag:               Entries 1:N   are A's subdiagonal              //
+// maindiag:              Entries 0:N   are A's main diagonal            //
+// superdiag:             Entries 0:N-1 are A's superdiagonal            //
+// RHSthendeltaw:         Entries 0:N   are the RHS and then delta w     //
+// epsilon:               Tolerance for Newton's Method  (input)         //
+// ellmax:                Maximum allowed number of iterations for       //
+//                        Newton's Method  (input)                       //
+// success:               Either 0 [failure] or 1 [success]  (output)    //
+//                                                                       //
+///////////////////////////////////////////////////////////////////////////
+
+{
+    // Declare some variables.
+    int i, ell;
+    double check;
+
+    // Initialize some variables.
+    ell = 0;                         // Iteration counter for Newton's Method
+    check = 10.0*epsilon;            // Quantity to be compared with epsilon in the Newton loop
+
+    // Print the title and the column headings for the Newton results table.
+    cout            << "\n\n NEWTON RESULTS on GRID " << setw(2) << gridnum
+                    << "\n\n Grid   Iter.      check\n";
+    *ptr_outputFile << "\n\n NEWTON RESULTS on GRID " << setw(2) << gridnum
+                    << "\n\n Grid   Iter.      check\n";
+    cout            << scientific << setprecision(4);
+    *ptr_outputFile << scientific << setprecision(4);
+
+    // Print a horizontal line below the column headings.
+    cout            << "---------------------------\n";
+    *ptr_outputFile << "---------------------------\n";
+
+    // For the solution process on the given grid (either the initial grid or one of the adaptive
+    // grids), start the Newton's Method loop here.  Because you won't know ahead of time how many 
+    // iterations will be needed to reach convergence, you'll need to replace the 'for' loop with 
+    // a 'while' loop.
+
+    while (ell < ellmax)
+    {
+        // Populate the entries in the top row of the Jacobian matrix and the top entry of the RHS
+        // vector of the linear system.  This information comes from the treatment of the BC at the
+        // left boundary (x=a).
+        maindiag[0] = 1;
+        superdiag[0] = 0;
+        RHSthendeltaw[0] = -(w[0] - alpha);  // Stores RHS now and eventually delta w.
+
+        // Populate the interior rows of the Jacobian matrix and the interior entries of the RHS
+        // vector of the linear system.  This information comes from the treatment of the ODE at the 
+        // interior points (a < x < b).
+        for (i=1; i<=N-1; i++)
+        {
+            double m = dx[i-1]; 
+            double p = dx[i];
+            double ms = pow(m, 2);
+            double ps = pow(p, 2); 
+            double denom = m * p * (m + p);
+            double yp = ((ms * w[i+1]) + ((ps - ms) * w[i]) - (ps * w[i-1])) / denom;
+            double ypp = ((m * w[i+1]) - ((m + p) * w[i]) + (p * w[i-1])) / (0.5 * denom);
+            subdiag[i] = (p / (0.5 * denom)) - (20 * w[i] * (ps/denom));
+            maindiag[i] = (-(m + p) / (0.5 * denom)) + (20 * yp) + (20 * w[i] * ((ps - ms)/denom));
+            superdiag[i] = (m / (0.5 * denom)) + (20 * w[i] * (ms/denom));
+            RHSthendeltaw[i] = -(ypp + (20 * w[i] * yp));  // Stores RHS now and eventually delta w.
+        }
+
+        // Populate the entries in the bottom row of the Jacobian matrix and the bottom entry of 
+        // the RHS vector of the linear system.  This information comes from the treatment of the 
+        // BC at the right boundary (x=b).
+        subdiag[N] = 0;
+        maindiag[N] = 1;
+        RHSthendeltaw[N] = -(w[N] - beta);  // Stores RHS now and eventually delta w.
+
+        // Perform an LU Decomposition on the Jacobian matrix.
+        LUdecomp(N, subdiag, maindiag, superdiag);
+
+        // Perform a Forward Solve and a Back Solve.
+        FsolveBsolve(N, subdiag, maindiag, superdiag, RHSthendeltaw);
+
+        // Compute check, which is defined in the problem statement.
+        check = twonorm(RHSthendeltaw, 0, N)/twonorm(w, 0, N);
+
+        // Update the w vector.
+        for (i=0; i<=N; i++)
+        {
+            w[i] += RHSthendeltaw[i];
+        }
+
+        // Print one row of the Newton results table.
+        cout            << " "    << setw(3) << gridnum
+                        << "  "   << setw(5) << ell+1
+                        << "    " << setw(11) << check << endl;
+        *ptr_outputFile << " "    << setw(3) << gridnum
+                        << "  "   << setw(5) << ell+1
+                        << "    " << setw(11) << check << endl;
+
+        // Prepare for next time through the Newton's Method loop.
+        ell++;
+
+        if (check <= epsilon)
+        {break;}
+    }
+
+    // Print another horizontal line.
+    cout            << "---------------------------\n";
+    *ptr_outputFile << "---------------------------\n";
+
+
+    // Print a conclusion statement about the outcome of the Newton's Method loop.
+    if (check >= epsilon)
+    {
+        *success = 0;  // Newton failed!
+        cout            << " Newton didn't converge in " << setw(3) << ellmax 
+                        << " iterations.  Stopping...\n" << endl;
+        *ptr_outputFile << " Newton didn't converge in " << setw(3) << ellmax 
+                        << " iterations.  Stopping...\n" << endl;
+        return;
+    }
+    else
+    {
+        *success = 1;  // Newton succeeded!
+        // Put some lines here to print to the screen and to the output file.
+
+        cout << "Newton Converged! It required " << ell << " iterations." << endl;
+        *ptr_outputFile << "Newton Converged! It required " << ell << " iterations." << endl;
+    }
+
+    // Print the converged w vector obtained by Newton and other useful information.
+    printSoln(ptr_outputFile, ptr_plotFile, gridnum, N, x, dx, w);
+
+    return;
+}
+
+void LUdecomp(int N, double dt[], double eu[], double fv[])
+
+///////////////////////////////////////////////////////////////////////////
+//                                                                       //
+// Given a nonsingular tridiagonal matrix A, this function performs      //
+// an LU Decomposition.  Variables in the arg list have the following    //
+// meanings.                                                             //
+//                                                                       //
+// N:      One less than the size of the system (input)                  //
+// dt:     Entries 1:N   are A's subdiagonal    (input)                  //
+//         Entries 1:N   are L's subdiagonal    (output)                 //
+// eu:     Entries 0:N   are A's main diagonal  (input)                  //
+//         Entries 0:N   are U's main diagonal  (output)                 //
+// fv:     Entries 0:N-1 are A's superdiagonal  (input)                  //
+//         Entries 0:N-1 are U's superdiagonal  (output)                 //
+//                                                                       //
+///////////////////////////////////////////////////////////////////////////
+
+{
+    int i;
+
+    for (i=1; i<=N; i++)
+    {
+        dt[i] = dt[i]/eu[i-1];
+        eu[i] = eu[i] - dt[i]*fv[i-1];
+    }
+
+    return;
+}
+
+void FsolveBsolve(int N, double dt[], double eu[], double fv[], double byw[])
+
+///////////////////////////////////////////////////////////////////////////
+//                                                                       //
+// Given the LU Decomposition of a nonsingular tridiagonal matrix A      //
+// along with a RHS vector, this function performs a Forward Solve       //
+// followed by a Back Solve.  Variables in the arg list have the         //
+// following meanings.                                                   //
+//                                                                       //
+// N:      One less than the size of the system  (input)                 //
+// dt:     Entries 1:N   are L's subdiagonal     (input)                 //
+// eu:     Entries 0:N   are U's main diagonal   (input)                 //
+// fv:     Entries 0:N-1 are U's superdiagonal   (input)                 //
+// byw:    Entries 0:N   are the RHS vector      (input)                 //
+//         Entries 0:N   are the solution vector (output)                //
+//                                                                       //
+///////////////////////////////////////////////////////////////////////////
+
+{
+    int i;
+
+    // Forward Solve
+    for (i=1; i<=N; i++)
+    {
+        byw[i] = byw[i] - dt[i]*byw[i-1];
+    }
+
+    // Back Solve
+    byw[N] = byw[N]/eu[N];
+    for (i=N-1; i>=0; i--)
+    {
+        byw[i] = (byw[i] - fv[i]*byw[i+1])/eu[i];
+    }
+
+    return;
+}
+
+double twonorm(double v[], int indbeg, int indend)
+
+///////////////////////////////////////////////////////////////////////////
+//                                                                       //
+// Given a vector v, the beginning index for entries in v, and the       //
+// ending index for entries in v, this function computes v's 2-norm.     //
+// Variables in the arg list have the following meanings.                //
+//                                                                       //
+// v:      Vector  (input)                                               //
+// indbeg: Beginning index for entries in v  (input)                     //
+// indend: Ending index for entries in v  (input)                        //
+//                                                                       //
+///////////////////////////////////////////////////////////////////////////
+
+{
+    double answer;
+    int i;
+
+    answer = v[indbeg]*v[indbeg];
+    for (i=indbeg+1; i<=indend; i++)
+    {
+        answer += v[i]*v[i];
+    }
+    answer = sqrt(answer);
+
+    return answer;
+}
+
+void printSoln(ofstream *ptr_outputFile, ofstream *ptr_plotFile, 
+               int gridnum, int N, double x[], double dx[], double w[])
+
+///////////////////////////////////////////////////////////////////////////
+//                                                                       //
+// This function prints the results table and the plotting data table    //
+// for a converged solution on a given grid.  Variables in the arg list  //
+// have the following meanings.                                          //
+//                                                                       //
+// ptr_outputFile:        Pointer to the output file  (input)            //
+// ptr_plotFile:          Pointer to the plotting data file  (input)     //
+// gridnum:               Grid number  (input)                           //
+// N:                     One less than the size of the system  (input)  //
+// x:                     Entries 0:N are the grid pt locations (input)  //
+// dx:                    Entries 0:N-1 are the grid spacings  (input)   //
+// w:                     Entries 0:N are the solution vector  (input)   //
+//                                                                       //
+///////////////////////////////////////////////////////////////////////////
+
+{
+    // Declare some variables.
+    int i;
+    double yactual, error, maxabserror, xmaxabserror;
+
+    // Print a message to the screen.
+    cout << "\n Converged solution on Grid " << setw(2) << gridnum 
+         << " is being printed to the output file and to the plotting data file...\n\n";
+
+    // Print the title and the column headings for the results table and for the plotting data table.
+    *ptr_outputFile << "\n\n                     CONVERGED SOLN FROM NEWTON on GRID " 
+                    << setw(2) << gridnum << "\n\n"
+                    << "     i          x               dx              w            y         error\n";
+    *ptr_plotFile   << "\n\n                         CONVERGED SOLN FROM NEWTON on GRID " 
+                    << setw(2) << gridnum << "\n\n"
+                    << "          x                    dx                 w              y            error\n";
+
+    // Print a horizontal line below the column headings.
+    *ptr_outputFile << "--------------------------------------------------------------------------------\n";
+    *ptr_plotFile   << "---------------------------------------------------------------------------------------\n";
+
+    // Prepare for the loop.
+    maxabserror = 0.0;
+    xmaxabserror = x[0];
+
+    for (i=0; i<=N; i++)
+    {
+        // Calculate the analytical soln at x[i].  This step wouldn't normally be part of a numerical
+        // method, because for a practical problem the analytical soln wouldn't be known.
+        yactual = y(x[i]);
+
+        // Accumulate |e|_max and the x value at which it occurs.
+        error = yactual - w[i];
+        if (fabs(error) > maxabserror)
+        {
+            maxabserror = fabs(error);
+            xmaxabserror = x[i];
+        }
+
+        // Print one row of the results table and of the plotting data table.
+        *ptr_outputFile << " "  << setw(5) << i
+                        << "  " << fixed << setw(15) << setprecision(12) << x[i]
+                        << "  " << setw(15) << dx[i]
+                        << "  " << scientific << setw(11) << setprecision(4) << w[i]
+                        << "  " << setw(11) << yactual
+                        << "  " << setw(11) << error << endl;
+        *ptr_plotFile   << scientific << setprecision(12)
+                        << " "  << setw(19) << x[i]
+                        << "  " << setw(19) << dx[i]
+                        << "  " << setw(13) << setprecision(6) << w[i]
+                        << "  " << setw(13) << yactual
+                        << "  " << setw(13) << error << endl;
+    }
+
+    // Print another horizontal line.
+    *ptr_outputFile << "--------------------------------------------------------------------------------\n";
+    *ptr_plotFile   << "---------------------------------------------------------------------------------------\n";
+
+    // To the screen and to the output file, print |e|max and the location at which it occurred.
+    cout            << "On Grid " << setw(2) << gridnum 
+                    << ": |e|max = " << setw(11) << setprecision(4) << maxabserror
+                    << " at x = " << fixed << setw(15) << setprecision(12) << xmaxabserror << endl;
+    *ptr_outputFile << "On Grid " << setw(2) << gridnum
+                    << " |e|max = " << setw(11) << setprecision(4) << maxabserror
+                    << " at x = " << fixed << setw(15) << setprecision(12) << xmaxabserror << endl;
+
+    return;
+}
+
+double y(double x)
+
+///////////////////////////////////////////////////////////////////////////
+//                                                                       //
+// This function evaluates the analytical solution at a given x.         //
+// Variables in the arg list have the following meanings.                //
+//                                                                       //
+// x:                     Value of x at which to evaluate y  (input)     //
+//                                                                       //
+///////////////////////////////////////////////////////////////////////////
+
+{
+    double answer;
+
+    answer = tanh(10.0*x - 5.0);
+
+    return answer;
+}
+
+void evaluateGrid(int N, double dx[], double w[], double Ciip1[], double *Cequi, 
+                  double *checkgrid, double epsgrid, int *NptsToAdd)
+
+///////////////////////////////////////////////////////////////////////////
+//                                                                       //
+// This function evaluates the current grid in preparation for adapting  //
+// the grid.  Variables in the arg list have the following meanings.     //
+//                                                                       //
+// N:                 One less than the size of the system  (input)      //
+// dx:                Entries 0:N-1 are the grid spacings  (input)       //
+// w:                 Entries 0:N are the solution vector  (input)       //
+// Ciip1:             Entries 0:N-1 are the C_{i,i+1} values  (output)   //
+// Cequi:             Equidistribution constant  (output)                //
+// checkgrid:         Quantity that will eventually be compared to       //
+//                    (1+epsgrid)*Cequi  (output)                        //
+// epsgrid:           Tolerance for the adaptive gridding process (input)//
+// NptsToAdd:         Number of points to be added  (output)             //
+//                                                                       //
+///////////////////////////////////////////////////////////////////////////
+
+{
+    // Declare some variables.
+    int i;
+    *Cequi = 0;
+    *checkgrid = 0;
+    *NptsToAdd = 0; 
+
+    // Compute the C_{i,i+1} vector and the equidistribution constant.
+    for (i = 0; i <= N-1; i++)
+    {
+        Ciip1[i] = sqrt(pow(dx[i], 2) + pow(w[i+1] - w[i], 2));
+        *Cequi += Ciip1[i];
+        if (Ciip1[i] > *checkgrid)
+            *checkgrid = Ciip1[i];
+    }
+    *Cequi = *Cequi / N;
+
+    // Loop through the grid to determine the number of points to be added, but don't yet add
+    // those points to the grid.
+    for (i = 0; i <= N - 1; i++)
+    {
+        if (Ciip1[i] > (1 + epsgrid) * *Cequi)
+        {
+            (*NptsToAdd)++;
+        }
+
+    }
+    return;
+}
