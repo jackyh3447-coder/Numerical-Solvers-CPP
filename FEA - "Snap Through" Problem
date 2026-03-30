@@ -1,0 +1,92 @@
+import sympy as sp
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Symbols - defining some empty variables to plug in real numbers later
+w, h, L, A0, F, Emat = sp.symbols('w h L A0 F Emat')
+
+# Geometry
+b = sp.sqrt(L**2 - h**2) #bottom base
+l = sp.sqrt((h - w)**2 + b**2) #deformed/new length
+
+# Mechanics - equations we derived in class
+N = l*F/(w - h)
+e_gl = -h*w / L**2 + 0.5*(w/L)**2
+S = Emat * e_gl #Second Piola in terms of the green-lagrange strain
+T = L*N / (l*A0) #Second Piola in terms of statics!
+
+# Equation: Sets S = T
+eq = sp.Eq(S, T) 
+
+# Parameters 
+h_val, L_val = 0.6, 1.0 #Real values for h (initial height) and L (initial length)
+A0_val, Emat_val = 1e-4, 210e5 #Real values for the area and modulus of elasticity
+
+guess = 1.0 #Initialize a first guess for Newton Raphson
+
+#------------------------------------------------------------------------------------------------------------------
+#Solve for F at a given w
+
+def solve_for_F(w_val, guess):
+    eq_sub = eq.subs({w: w_val, h: h_val, L: L_val, A0: A0_val, Emat: Emat_val}) #Plugs in those parameters into our symbols from earlier
+    F_sol = sp.nsolve(eq_sub, F, guess)   #Uses Newton-Raphson Methods solve with a guess! How convenient.
+    return float(F_sol)
+
+F_vals = []  #Initialize the force given the displacement
+
+# Sweep over displacements
+w_vals = np.linspace(0.001, 1.6, 20) #For given displacements...(make sure you don't start at 0)
+for wv in w_vals: #Find the corresponding Force required, updating a the ``guess`` to be the last value
+     F_sol = solve_for_F(wv, guess)
+     F_vals.append(F_sol)
+     guess = F_sol
+#--------------------------------------------------------------------------------------------------------------------
+#Solve for w at a given F
+
+def solve_for_w(F_val, guess):
+    eq_sub = eq.subs({F: F_val, h: h_val, L: L_val, A0: A0_val, Emat: Emat_val}) #Plugs in those parameters into our symbols from earlier
+    try:
+          sol = sp.nsolve(eq_sub, w, guess)   #Uses Newton-Raphson Methods solve with a guess! How convenient.
+          return float(sol)
+    except:
+         return None
+
+
+guess = 0.01
+w_vals2 = []  # Initialize the displacements given the forces
+F_vals2 = np.linspace(0.001, 700, 50)  # For given forces... (make sure you don't start at 0)
+for F_val in F_vals2:  # Find the corresponding displacement required, updating the ``guess`` everytime
+    w_sol = solve_for_w(F_val, guess)
+    w_vals2.append(w_sol)
+    guess = w_sol
+#----------------------------------------------------------------------------------------------------------------
+
+#Non-dimensionalize like in class
+#The first two are the displacement-driven curves
+F_vals_non_dimensionalized = [F_val * L_val**3 / (Emat_val * A0_val * h_val**3) for F_val in F_vals]
+wval_non_dimensionalized = [wv / h_val for wv in w_vals]
+
+#These last two are the force-driven curves
+F_vals2_non_dimensionalized = [F_val * L_val**3 / (Emat_val * A0_val * h_val**3) for F_val in F_vals2]
+wvals2_non_dimensionalized = [wv / h_val for wv in w_vals2]
+
+
+# Plot
+
+#This one plots the displacement-driven experiment
+# plt.plot(w_vals, F_vals, "o-") 
+
+#This one plots the displacement-driven experimental non-dimensionalized 
+plt.plot(wval_non_dimensionalized, F_vals_non_dimensionalized, "o-", color="red")
+
+#This one plots the force-driven experiment
+# plt.plot(w_vals2, F_vals2, "o-")
+
+#This one plots the force-driven experimental non-dimensionalized 
+plt.plot(wvals2_non_dimensionalized, F_vals2_non_dimensionalized, "o-", color="green")
+
+plt.xlabel("Displacement")
+plt.ylabel("Force")
+plt.title("Load Curve")
+plt.grid(True)
+plt.show()
