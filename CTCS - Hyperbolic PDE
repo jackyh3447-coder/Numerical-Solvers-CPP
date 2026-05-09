@@ -1,0 +1,459 @@
+///////////////////////////////////////////////////////////////////////////
+//                                                                       //
+//                      C++ Starter Code for Pset 9                     //
+//                     ENAS 4041/MENG 4041/MENG 5041                     //
+//                                                                       //
+// The main purpose of this code is to set up the overall framework for  //
+// solving a linear parabolic PDE using the CTCS Method.  Details of the //
+// actual algorithm have been omitted, and some steps aren't even given  //
+// as comments.  For example, you'll need to insert code to update U via //
+// the CTCS Method (including implementing the BCs), determine whether   //
+// the method has become unstable or whether U has reached a numerical   //
+// steady state, etc.  Moreover, some variables have been set to random  //
+// numbers.  Some print statements are missing.  The functions that      //
+// produce the IC and BC data need updating, as does the function that   //
+// produces the analytical solution.                                     //
+//                                                                       //
+// AN IMPORTANT NOTE ABOUT ARRAYS:                                       //
+//                                                                       //
+// There are only two arrays (i.e., vectors or matrices) in this code.   //
+// Please don't insert any additional ones!  The reasons are the same as //
+// those given in the starter code for Pset 2.                           //
+//                                                                       //
+// Please take time to read the code thoroughly before modifying it.     //
+//                                                                       //
+// Developed by Beth Bennett for ENAS 4041/MENG 4041/MENG 5041.          //
+//                                                                       //
+///////////////////////////////////////////////////////////////////////////
+
+// Don't forget to include these useful header files.
+#include <iostream>
+#include <iomanip>
+#include <fstream>
+#include <cstdlib>
+#include <cmath>
+
+using namespace std;
+
+// Define NX.
+#define NX 20
+#define NXp1 NX+1
+
+// Declare user-defined functions that are defined later.
+double f(double x);
+double d(double x);
+double gL(double t);
+double gR(double t);
+double u(double x, double t);
+void printSteady(ofstream *ptr_outputFile, ofstream *ptr_plotFile,
+                 double xleft, double deltax, int N, double Usteady[], double tssnum);
+
+int main()
+{
+    // Declare some variables.
+    // You'll definitely need to declare more variables, but don't declare any more arrays.
+    int i, n, NT;
+    double xleft, xright, tinit, tend;
+    double x, told, tnew;
+    double s, deltax, deltat;
+    double Uoldold[NXp1], Uold[NXp1], Unew[NXp1];
+    double maxabserror, tmaxerror, xmaxerror, ICoption;
+    int istar;
+    double xstar, uactual, error;
+    double constant_1, constant_2;
+
+    // Open an output file and a plotting data file.
+    ofstream outputFile, plotFile;
+    outputFile.open("C:/Users/jacky/Desktop/Notes/Numerical Methods Code/Numerical Methods Code PSET 9/CTCS Output/CPP_output_data_ENAS4041_pset09_2.000_.txt");
+    plotFile.open("C:/Users/jacky/Desktop/Notes/Numerical Methods Code/Numerical Methods Code PSET 9/CTCS Output/CPP_plotting_data_ENAS4041_pset09_2    .000_.txt");
+
+    // Print title to the screen, to the output file, and to the plotting data file.
+    cout       << "\n OUTPUT FROM CPP_starter_ENAS4041_pset09.cpp\n\n";
+    outputFile << "\n OUTPUT FROM CPP_starter_ENAS4041_pset09.cpp\n\n";
+    // plotFile   << "\n PLOTTING DATA FROM CPP_starter_ENAS4041_pset07.cpp\n\n";
+
+    // Initialize some variables.
+    xleft  = 0.0;                              // x value at left end of domain
+    xright = 1.0;                              // x value at right end of domain
+    tinit = 0.0;                               // t value at which integration will start
+    tend = 5.0;                                // t value at which integration will end
+    maxabserror = 0.0;                         // |e|_max the maximum error
+    tmaxerror = 0.0;                           // t value of the maximum error
+    xmaxerror = 0.0;                           // x value of the maximum error
+    xstar = 0.25;                               // x value at which |e| will be output
+    istar = 5;                                 // i value corresponding to xstar
+    ICoption = 0;
+
+    cout << " Please input the value of s.\n";
+    cin >> s;                                  // Ratio of deltat to the square of deltax
+
+    cout << "Please input 0 if you would like to use a forward difference.\n"
+         "Please input 1 if you would like to approximate using a ghost point:" << endl;
+    cin >> ICoption;                           // How to handle the t = 1 case
+
+    cout << endl;                              // Output blank line to the screen
+    deltax = (xright-xleft)/NX;                // Grid spacing
+    deltat = deltax * s;  // Time step
+
+    // To the screen and to the output file, print the name of the method, information about 
+    // the problem being solved, and the values of deltax, deltat, and r.
+    cout       << fixed << setprecision(7);
+    outputFile << fixed << setprecision(7);
+    cout       << " Using the CTCS Method to solve a Hyperbolic PDE\n"
+               << " with BCs at x = " << setw(11) << xleft 
+               << " and x = " << setw(11) << xright << endl
+               << " and an IC at t = " << setw(11) << tinit << endl
+               << " (deltax = " << setw(9) << deltax
+               << ", deltat = " << setw(9) << deltat
+               << ", s = " << setw(10) << s << ")\n\n";
+    outputFile << " Using the CTCS Method to solve a Hyperbolic PDE\n"
+               << " with BCs at x = " << setw(11) << xleft
+               << " and x = " << setw(11) << xright << endl
+               << " and an IC at t = " << setw(11) << tinit << endl               
+               << " (deltax = " << setw(9) << deltax
+               << ", deltat = " << setw(9) << deltat
+               << ", s = " << setw(10) << s << ")\n\n";
+
+    // Print the column headings for the results table and for the plotting data table.
+    cout       << "\n                           TIME-DEPENDENT SOLN FOR 0 <= x <= 0.25\n\n"
+               << "    n       t      U(0.00,t)    U(0.05,t)    U(0.10,t)    U(0.15,t)    U(0.20,t)    U(0.25,t)\n";
+    outputFile << "\n                           TIME-DEPENDENT SOLN FOR 0 <= x <= 0.25\n\n"
+               << "    n       t      U(0.00,t)    U(0.05,t)    U(0.10,t)    U(0.15,t)    U(0.20,t)    U(0.25,t)\n";
+    plotFile   //<< "\n               TIME-DEPENDENT SOLN AT x = 0.25\n\n"
+               << "        t         U(0.25,t)      u(0.25,t)     |e(0.25,t)|\n";
+
+    // Print a horizontal line below the column headings.
+    cout       << "-----------------------------------------------------------------------------------------------\n";
+    outputFile << "-----------------------------------------------------------------------------------------------\n";
+    //plotFile   << "------------------------------------------------------------\n";
+
+    // Prepare for the loop over the time levels.
+    n = 0;
+    told = tinit;
+    
+    x = xleft - deltax;
+    // Populate the Uold and Uoldold array with the IC data.
+
+    for (i = 0; i <= NX; i++)
+    {
+        x = x + deltax;
+        Uoldold[i] = f(x);
+    }
+
+    // For plotting purposes, determine the analytical solution and the error at x=0.25.
+    uactual = u(xstar, told);
+    error = uactual - Uoldold[istar];
+
+    // Print the information for n=0.
+    cout
+    << " " << setw(4) << n << "  " << fixed << setw(9) << setprecision(5) << told
+    << "  " << scientific << setw(11) << setprecision(4) << Uoldold[0] << "  " << setw(11) << Uoldold[1]
+    << "  " << setw(11) << Uoldold[2] << "  " << setw(11) << Uoldold[3]
+    << "  " << setw(11) << Uoldold[4] << "  " << setw(11) << Uoldold[5] << endl;
+    outputFile << " "  << setw(4) << n << "  " << fixed << setw(9) << setprecision(5) << told
+               << "  " << scientific << setw(11) << setprecision(4) << Uoldold[0] << "  " << setw(11) << Uoldold[1] 
+               << "  " << setw(11) << Uoldold[2] << "  " << setw(11) << Uoldold[3] 
+               << "  " << setw(11) << Uoldold[4] << "  " << setw(11) << Uoldold[5] << endl;
+    plotFile   << scientific << setprecision(6)
+               << " "  << setw(13) << told
+               << "  " << setw(13) << Uoldold[istar]
+               << "  " << setw(13) << uactual
+               << "  " << setw(13) << fabs(error) << endl;
+
+    tnew = told + deltat;
+    n++;
+
+    x = xleft - deltax;
+
+    if (ICoption == 0)
+    {
+        for (i = 1; i <= NX - 1; i++)
+        {
+            x = x + deltax;
+            Uold[i] = Uoldold[i] + d(x) * deltat;
+        }
+    }
+    else
+    {
+        constant_1 = s * s / 2;
+        constant_2 = 1 - (s * s);
+        for (i = 1; i <= NX - 1; i++)
+        {
+            x = x + deltax;
+            Uold[i] = constant_1 * (Uoldold[i - 1] + Uoldold[i+1]) + constant_2 * Uoldold[i] + (d(x) * deltat);
+        }
+    }
+
+    Uold[0] = gL(tnew);
+    Uold[NX] = gR(tnew);
+
+        // For plotting purposes, determine the analytical solution and the error at x = 0.25.
+    uactual = u(xstar, tnew);
+    error = uactual - Uold[istar];
+
+    // Print the information for n=0.
+    cout
+        << " " << setw(4) << n << "  " << fixed << setw(9) << setprecision(5) << tnew
+        << "  " << scientific << setw(11) << setprecision(4) << Uold[0] << "  " << setw(11) << Uold[1]
+        << "  " << setw(11) << Uold[2] << "  " << setw(11) << Uold[3]
+        << "  " << setw(11) << Uold[4] << "  " << setw(11) << Uold[5] << endl;
+    outputFile << " " << setw(4) << n << "  " << fixed << setw(9) << setprecision(5) << tnew
+               << "  " << scientific << setw(11) << setprecision(4) << Uold[0] << "  " << setw(11) << Uold[1]
+               << "  " << setw(11) << Uold[2] << "  " << setw(11) << Uold[3]
+               << "  " << setw(11) << Uold[4] << "  " << setw(11) << Uold[5] << endl;
+    plotFile << scientific << setprecision(6)
+             << " " << setw(13) << tnew
+             << "  " << setw(13) << Uold[istar]
+             << "  " << setw(13) << uactual
+             << "  " << setw(13) << fabs(error) << endl;
+
+    told = tnew;
+    tnew = told + deltat;
+
+    // Start the loop over the time levels here.
+    //Evaluate some constants first!
+    constant_1 = s*s;
+    constant_2 = 2*(1 - constant_1);
+
+    // Of course, you'll have to replace the 'for' loop with a 'while' loop.
+    while (tnew <= tend)
+    {
+        // Unew is the RHS. It will eventually become the numerical solution at the timestep
+        // Population the RHS (Unew) first.
+        Unew[0] = gL(tnew);
+
+        for (i=1; i<=NX-1; i++)
+        {
+            Unew[i] = constant_1 * (Uold[i+1] + Uold[i-1]) + constant_2 * Uold[i] - Uoldold[i];
+        }
+
+        Unew[NX] = gR(tnew);
+
+        // For plotting purposes, determine the analytical solution and the error at x=0.3.
+        uactual = u(xstar, tnew);
+        error = uactual - Unew[istar];
+
+        // Check to see if temperature exceed a million. If it does, print an error and get out of the code.
+
+        for (i = 0; i <= NX; i++)
+        {
+        if (fabs(Unew[i]) < 1e6)
+            {
+            double current_x = xleft + i*deltax;
+            double local_error = fabs(u(current_x, tnew) - Unew[i]);
+            if (local_error > maxabserror)
+                {
+                maxabserror = local_error;
+                tmaxerror = tnew;
+                xmaxerror = current_x;
+                }
+            Uoldold[i] = Uold[i];
+            Uold[i] = Unew[i];
+            }
+        else
+            {
+            cout << "The numerical method is unstable. Temperatures have reached over a million. Stopping code..." << endl;
+            outputFile << "The numerical method is unstable. Temperatures have reached over a million. Stopping code..." << endl;
+            return 1;
+            }
+        }
+
+
+        // Print one row of the results table and of the plotting data table.
+        cout       << " "  << setw(4) << n+1 << "  " << fixed << setw(9) << setprecision(5) << tnew
+                   << "  " << scientific << setw(11) << setprecision(4) << Unew[0] << "  " << setw(11) << Unew[1] 
+                   << "  " << setw(11) << Unew[2] << "  " << setw(11) << Unew[3] 
+                   << "  " << setw(11) << Unew[4] << "  " << setw(11) << Unew[5] << endl;
+        outputFile << " "  << setw(4) << n+1 << "  " << fixed << setw(9) << setprecision(5) << tnew
+                   << "  " << scientific << setw(11) << setprecision(4) << Unew[0] << "  " << setw(11) << Unew[1] 
+                   << "  " << setw(11) << Unew[2] << "  " << setw(11) << Unew[3] 
+                   << "  " << setw(11) << Unew[4] << "  " << setw(11) << Unew[5] << endl;
+        plotFile   << scientific << setprecision(6)
+                   << " "  << setw(13) << tnew
+                   << "  " << setw(13) << Unew[istar]
+                   << "  " << setw(13) << uactual
+                   << "  " << setw(13) << fabs(error) << endl;
+
+        // Prepare for the next time through the loop.
+        n++;
+        told = tnew;
+        if (told < tend && tnew > tend)
+            {tnew = 5;}
+        else
+            tnew = told + deltat;
+    }
+
+    // Print another horizontal line.
+    cout       << "-----------------------------------------------------------------------------------------------\n";
+    outputFile << "-----------------------------------------------------------------------------------------------\n";
+    // plotFile   << "------------------------------------------------------------\n";
+
+    cout << "The run was successful! The maximum error was: " << maxabserror << endl;
+    cout << "The maximum error occured at the x-location: x = " << xmaxerror << endl; 
+    cout << "At time level: t = " << tmaxerror << endl;
+
+    outputFile << "The run was successful! The maximum error was: " << maxabserror << endl;
+    outputFile << "The maximum error occured at the x-location: x = " << xmaxerror << endl;
+    outputFile << "At time level: t = " << tmaxerror << endl;
+
+    // Print a conclusion statement either stating that a steady state has been reached (and the
+    // time at which it's been reached) or stating that the finite difference formulation is unstable.
+
+    // You may find the following line to be useful.
+    printSteady(&outputFile, &plotFile, xleft, deltax, NX, Unew, tend);
+
+
+
+    // Close the output file and the plotting data file.
+    outputFile.close();
+    plotFile.close();
+
+    return 0;
+}
+
+double f(double x)
+
+///////////////////////////////////////////////////////////////////////////
+//                                                                       //
+// Here's an example of a user-defined function for the Dirichlet IC.    //
+//                                                                       //
+///////////////////////////////////////////////////////////////////////////
+
+{
+    double answer;
+
+    answer = 0.5 * sin(M_PI * x);
+
+    return answer;
+}
+
+double d(double x)
+
+//////////////////////////////////////////////////////////////////////////////////////////////
+//                                                                                          //
+// Here's an example of a user-defined function for the Dirichlet IC for the derivative.    //
+//                                                                                          //
+//////////////////////////////////////////////////////////////////////////////////////////////
+
+{
+    double answer;
+
+    answer = 0;
+
+    return answer;
+}
+
+double gL(double t)
+
+///////////////////////////////////////////////////////////////////////////
+//                                                                       //
+// Here's an example of a user-defined function for the Dirichlet BC at  //
+// the left boundary.                                                    //
+//                                                                       //
+///////////////////////////////////////////////////////////////////////////
+
+{
+    double answer;
+
+    answer = 0;
+
+    return answer;
+}
+
+double gR(double t)
+
+///////////////////////////////////////////////////////////////////////////
+//                                                                       //
+// Here's an example of a user-defined function for the Dirichlet BC at  //
+// the right boundary.                                                   //
+//                                                                       //
+///////////////////////////////////////////////////////////////////////////
+
+{
+    double answer;
+
+    answer = 0;
+
+    return answer;
+}
+
+double u(double x, double t)
+
+///////////////////////////////////////////////////////////////////////////
+//                                                                       //
+// Here's an example of a user-defined function for the analytical soln. //
+//                                                                       //
+///////////////////////////////////////////////////////////////////////////
+
+{
+    double answer;
+
+    answer = 0.5 * sin(M_PI * x) * cos(M_PI * t);
+
+    return answer;
+}
+
+void printSteady(ofstream *ptr_outputFile, ofstream *ptr_plotFile,
+                 double xleft, double deltax, int N, double Usteady[], double tssnum)
+
+///////////////////////////////////////////////////////////////////////////
+//                                                                       //
+// This function prints the results table and the plotting data table    //
+// for the steady-state solution.  Variables in the arg list have the    //
+// following meanings.                                                   //
+//                                                                       //
+// ptr_outputFile:        Pointer to the output file  (input)            //
+// ptr_plotFile:          Pointer to the plotting data file  (input)     //
+// xleft:                 x value at left end of domain  (input)         //
+// deltax:                Grid spacing  (input)                          //
+// N:                     One less than the number of x points (input)   //
+// Usteady:               Entries 0:N are the numerical steady-state     //
+//                        solution  (input)                              //
+// tssnum:                t value at numerical steady state  (input)     //
+//                                                                       //
+///////////////////////////////////////////////////////////////////////////
+
+{
+    // Declare some variables.
+    int i;
+    double x;
+
+    // Print a message to the screen.
+    cout << "\n Steady-state solution is being printed"
+         << " to the output file and to the plotting data file...\n\n";
+
+    // Print the title and the column headings for the results table and for the plotting data table.
+    *ptr_outputFile << fixed << setprecision(6)
+                    << "\n\n       STEADY-STATE SOLN\n     AT tssnum = " << setw(9) << tssnum << "\n\n"
+                    << "    i      x              U\n";
+    *ptr_plotFile   << fixed << setprecision(6)
+                    // << "\n\n STEADY-STATE SOLN AT tssnum = " << setw(9) << tssnum << "\n\n"
+                    << "U\n";
+
+    // Print a horizontal line below the column headings.
+    *ptr_outputFile << "-------------------------------\n";
+    // *ptr_plotFile   << "------------------------------------------\n";
+
+    // Prepare for the loop.
+    x = xleft - deltax;
+
+    for (i=0; i<=N; i++)
+    {
+         x += deltax;
+
+        // Print one row of the results table and of the plotting data table.
+        *ptr_outputFile << " "  << setw(4) << i
+                        << "  " << fixed << setw(8) << setprecision(5) << x
+                        << "  " << setw(13) << Usteady[i] << endl;
+        *ptr_plotFile   << scientific << setprecision(12)
+                        // << " "  << setw(19) << x
+                        << "  " << setw(19) << Usteady[i] << "," << endl;
+    }
+
+    // Print another horizontal line.
+    *ptr_outputFile << "-------------------------------\n";
+    // *ptr_plotFile   << "------------------------------------------\n";
+
+    return;
+
+    }
