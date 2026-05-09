@@ -1,0 +1,468 @@
+///////////////////////////////////////////////////////////////////////////
+//                                                                       //
+//                     C++ Starter Code for Pset 10                      //
+//                     ENAS 4041/MENG 4041/MENG 5041                     //
+//                                                                       //
+// The main purpose of this code is to set up the overall framework for  //
+// solving a linear elliptic PDE using the second-order centered differ- //
+// ences on a uniform grid.  Details of the actual algorithm have been   //
+// omitted, and some steps aren't even given as comments.  For example,  //
+// you'll have to insert code to implement either Point-Jacobi or        //
+// Point-Gauss-Seidel to solve the pentadiagonal linear system and to    //
+// determine |e|max at each iteration.  Moreover, some variables have    //
+// been set to random numbers.  Some print statements are missing.  The  //
+// functions that produce the BC data need updating, as do the functions //
+// that produce the PDE's RHS of the analytical solution.                //
+//                                                                       //
+// AN IMPORTANT NOTE ABOUT ARRAYS:                                       //
+//                                                                       //
+// There are only three arrays (i.e., vectors or matrices) in this code. //
+// Please don't insert any additional ones!  The reasons are the same as //
+// those given in the starter code for Pset 2.                           //
+//                                                                       //
+// Please take time to read the code thoroughly before modifying it.     //
+//                                                                       //
+// Developed by Beth Bennett for ENAS 4041/MENG 4041/MENG 5041.          //
+//                                                                       //
+///////////////////////////////////////////////////////////////////////////
+
+// Don't forget to include these useful header files.
+#include <fstream>
+#include <iostream>
+#include <iomanip>
+#include <cstdlib>
+#include <cmath>
+
+using namespace std;
+
+// Define NXmax and NYmax.
+#define NXmax 80
+#define NXmaxp1 NXmax+1
+#define NYmax 80
+#define NYmaxp1 NYmax+1
+
+// Declare user-defined functions that are defined later.
+double gB(double x);
+double gT(double x);
+double gL(double y);
+double gR(double y);
+double RHSofPDE(double x, double y);
+double u(double x, double y);
+void printPlottingData(ofstream *ptr_plotFile, double ybottom, double h, 
+                       int NY, double Uconverged[NXmaxp1][NYmaxp1], 
+                       double xstar, int istar);
+
+int main()
+{
+    // Declare some variables.
+    // You'll definitely have to declare more variables, but don't declare any more arrays.
+    int NX, NXp1, NY, NYp1, i, j, iter, maxiter;
+    int LSoption;
+    double xleft, xright, ybottom, ytop;
+    double x, y, h, epsilon, check, current_check;
+    double absemax, xabsemax, yabsemax, current_error;
+    double Uold[NXmaxp1][NYmaxp1], Unew[NXmaxp1][NYmaxp1], hsqf[NXmaxp1][NYmaxp1];
+    int istar;
+    double xstar, uactual;
+
+    // Open an output file and a plotting data file.
+    ofstream outputFile, plotFile;
+    outputFile.open("C:/Users/jacky/Desktop/Notes/Numerical Methods Code/Numerical Methods Code PSET 10/Point Method Output/output_Gauss_0.1.txt");
+    plotFile.open("C:/Users/jacky/Desktop/Notes/Numerical Methods Code/Numerical Methods Code PSET 10/Point Method Output/plotting_Gauss_0.1.txt");
+
+    // Print title to the screen, to the output file, and to the plotting data file.
+    cout       << "\n OUTPUT FROM CPP_starter_ENAS4041_pset10.cpp\n\n";
+    outputFile << "\n OUTPUT FROM CPP_starter_ENAS4041_pset10.cpp\n\n";
+    // plotFile   << "\n PLOTTING DATA FROM CPP_starter_ENAS4041_pset10.cpp\n\n";
+
+    // Initialize some variables.
+    xleft   = 0.0;                              // x value at left boundary of domain
+    xright  = 1.0;                              // x value at right boundary of domain
+    ybottom = 0.0;                              // y value at bottom boundary of domain
+    ytop    = 1.0;                              // y value at top boundary of domain
+    epsilon = 1e-12;                           // Tolerance for linear system solver
+    check = 10.0*epsilon;                       // Quantity to be compared with epsilon in the While loop
+    xstar = 0.4;                                // x value at which U, u, and |e| will be output
+    maxiter = 30000;                            // Maximum number of prescribed iterations     
+
+    cout << " Please input the value of h = delta x = delta y.\n";
+    cin >> h;                                   // Approximate desired spacing in x and y directions
+    NX = (int) floor((xright-xleft)/h + 0.1);   // Total number of intervals in x direction
+    h = (xright-xleft)/NX;                      // Actual spacing in x and y directions
+    NY = NX;                                    // Assume that the computational domain is a square
+    istar = NX*(xstar-xleft)/(xright-xleft);    // i value corresponding to xstar
+
+    // Initialize some more variables.
+    NXp1 = NX + 1;
+    NYp1 = NXp1;
+
+    if (NXp1>NXmaxp1 || NYp1>NYmaxp1)
+    {
+        cout << "Need to increase NXmax and NYmax in the code.  Stopping...\n";
+        return 0;
+    }
+
+    cout << "\n Which option do you want for the linear solver?\n"
+         << "   1 = Point-Jacobi Iteration\n"
+         << "   2 = Point-Gauss-Seidel Iteration\n"
+         << " Please input 1 or 2.\n";
+    cin >> LSoption;
+    cout << endl;
+
+    // To the screen and to the output file, print the name of the method, information about
+    // the problem being solved, the value of h, and the name of the linear solver.
+    cout       << fixed << setprecision(7);
+    outputFile << fixed << setprecision(7);
+    cout       << " Using Second-Order Centered Finite Differences"
+               << " to solve an elliptic PDE\n"
+               << " with BCs at x = " << setw(11) << xleft
+               << " and x = " << setw(11) << xright << endl
+               << "      and at y = " << setw(11) << ybottom
+               << " and y = " << setw(11) << ytop << endl
+               << " (h = " << setw(9) << h << ")\n\n";
+    outputFile << " Using Second-Order Centered Finite Differences"
+               << " to solve an elliptic PDE\n"
+               << " with BCs at x = " << setw(11) << xleft
+               << " and x = " << setw(11) << xright << endl
+               << "      and at y = " << setw(11) << ybottom
+               << " and y = " << setw(11) << ytop << endl
+               << " (h = " << setw(9) << h << ")\n\n";
+    if (LSoption == 1)
+    {
+        cout       << " Linear solver: Point-Jacobi Iteration\n\n";
+        outputFile << " Linear solver: Point-Jacobi Iteration\n\n";
+        // plotFile   << " Linear solver: Point-Jacobi Iteration\n\n";
+    }
+    else
+    {
+        cout       << " Linear solver: Point-Gauss-Seidel Iteration\n\n";
+        outputFile << " Linear solver: Point-Gauss-Seidel Iteration\n\n";
+        // plotFile   << " Linear solver: Point-Gauss-Seidel Iteration\n\n";
+    }
+
+    // Print the column headings for the results table.  Defer printing column headings for the
+    // plotting data table until the numerical method has converged.
+    cout       << setprecision(4);
+    outputFile << setprecision(4);
+    cout       << " Iter.      |e|max     Location of |e|max     check\n";
+    outputFile << " Iter.      |e|max     Location of |e|max     check\n";
+
+    // Print a horizontal line below the column headings.
+    cout       << "-------------------------------------------------------\n";
+    outputFile << "-------------------------------------------------------\n";
+
+    // Prepare for the iteration loop.
+    iter = 0;
+
+    // Populate the Uold and Unew arrays with the BC data along the boundaries.
+    x = xleft - h;
+    for (i=0; i<NXp1; i++)
+    {
+        x = x + h;
+        Uold[i][0] = gB(x);
+        Unew[i][0] = Uold[i][0];
+        Uold[i][NY] = gT(x);
+        Unew[i][NY] =  Uold[i][NY];
+    }
+    y = ybottom;
+    for (j=1; j<NY; j++)
+    {
+        y = y + h;
+        Uold[0][j] = gL(y);
+        Unew[0][j] = Uold[0][j];
+        Uold[NX][j] = gR(y);
+        Unew[NX][j] = Uold[NX][j];
+    }
+
+    // Populate the Uold and hsqf array with initial guess data at the interior points.
+
+    for (i = 1; i < NX; i++)
+    {
+        x = xleft + i*h;
+        for (j = 1; j < NY; j++)
+            {
+                y = ybottom + j*h;
+                Uold[i][j] = 1;
+                hsqf[i][j] = h * h * RHSofPDE(x, y);
+            }
+    }
+
+    // Start the iteration loop here.
+    // Of course, you'll need to replace the 'for' loop with a 'while' loop.
+
+    while (iter < maxiter)
+    {
+        // Update entries in Unew using a set of loops.
+        // Here's where you'll implement either Point-Jacobi or Point-Gauss-Seidel.
+
+        if (LSoption == 1) // Question Here?
+            {
+                for (i=1; i<=NX-1; i++)
+                {
+                    for (j=1; j<=NY-1; j++)
+                    {
+                        Unew[i][j] = 0.25 * (Uold[i][j-1] + Uold[i-1][j] + Uold[i+1][j] + Uold[i][j+1] - hsqf[i][j]);
+                    }
+                }
+            }
+
+        else
+        {
+            for (i = 1; i <= NX - 1; i++)
+            {
+                for (j = 1; j <= NY - 1; j++)
+                {
+                    Unew[i][j] = 0.25 * (Unew[i][j - 1] + Unew[i - 1][j] + Uold[i + 1][j] + Uold[i][j + 1] - hsqf[i][j]);
+                }
+            }
+        }
+        
+        // In another set of loops, determine |e|max and its location, as well as check.
+        // Don't forget the absolute value!
+        absemax = 0.0;
+        xabsemax = 0.0;
+        yabsemax = 0.0;
+        check = 0.0;
+        current_error = 0.0;
+
+        for (i=1; i<=NX-1; i++)
+        {
+            x = xleft + i*h;
+            for (j=1; j<=NY-1; j++)
+            {
+                y = ybottom + j * h;
+                current_check = fabs(Unew[i][j] - Uold[i][j]);
+                current_error = fabs(u(x,y) - Unew[i][j]);
+                if (current_error > absemax)
+                    {
+                        absemax = current_error;
+                        xabsemax = x;
+                        yabsemax = y;
+                    }
+                if (current_check > check)
+                    {check = current_check;}
+            }
+        }
+
+        // Print one row of the results table.
+        cout       << " " << setw(5) << iter+1 << "   " << scientific << setw(11) << absemax
+                   << "    (" << fixed << setw(6) << xabsemax << ", " << setw(6) << yabsemax 
+                   << ")   " << scientific << setw(11) << check << endl;
+        outputFile << " " << setw(5) << iter+1 << "   " << scientific << setw(11) << absemax
+                   << "    (" << fixed << setw(6) << xabsemax << ", " << setw(6) << yabsemax 
+                   << ")   " << scientific << setw(11) << check << endl;
+
+        // Prepare for the next time through the loop.
+        if (check < epsilon)
+            {
+            break;
+            }
+
+        for (i = 1; i <= NX - 1; i++)
+        {
+            for (j = 1; j <= NY - 1; j++)
+            {
+                Uold[i][j] = Unew[i][j];
+            }
+        }
+
+        iter++;
+    }
+
+    // Print another horizontal line.
+    cout       << "-------------------------------------------------------\n";
+    outputFile << "-------------------------------------------------------\n";
+
+    // Print a conclusion statement either stating that a solution has been found (and the number
+    // iterations that were required) or stating that the method failed to converge in a certain 
+    // number of iterations.
+
+    if (check < epsilon)
+        {
+            cout << "A solution has been found and the method converged! Iterations required: " << iter + 1 << endl;
+            outputFile << "A solution has been found and the method converged! Iterations required: " << iter + 1 << endl;
+        }
+    
+    else
+        {
+            cout << "Method failed. Reached " << maxiter << " iterations -itermax- before failing";
+            outputFile << "Method failed. Reached " << maxiter << " iterations -itermax- before failing";
+        }
+
+    // You may find the following line to be useful.
+    printPlottingData(&plotFile, ybottom, h, NY, Unew, xstar, istar);
+
+
+
+    // Close the output file and the plotting data file.
+    outputFile.close();
+    plotFile.close();
+
+    return 0;
+}
+
+double gB(double x)
+
+///////////////////////////////////////////////////////////////////////////
+//                                                                       //
+// Here's an example of a user-defined function for the Dirichlet BC at  //
+// the bottom boundary.                                                  //
+//                                                                       //
+///////////////////////////////////////////////////////////////////////////
+
+{
+    double answer;
+
+    answer = pow(M_E, -x);
+
+    return answer;
+}
+
+double gT(double x)
+
+///////////////////////////////////////////////////////////////////////////
+//                                                                       //
+// Here's an example of a user-defined function for the Dirichlet BC at  //
+// the top boundary.                                                     //
+//                                                                       //
+///////////////////////////////////////////////////////////////////////////
+
+{
+    double answer;
+
+    answer = pow(M_E, -(x + 1));
+
+    return answer;
+}
+
+double gL(double y)
+
+///////////////////////////////////////////////////////////////////////////
+//                                                                       //
+// Here's an example of a user-defined function for the Dirichlet BC at  //
+// the left boundary.                                                    //
+//                                                                       //
+///////////////////////////////////////////////////////////////////////////
+
+{
+    double answer;
+
+    answer = pow(M_E, -y);
+
+    return answer;
+}
+
+double gR(double y)
+
+///////////////////////////////////////////////////////////////////////////
+//                                                                       //
+// Here's an example of a user-defined function for the Dirichlet BC at  //
+// the right boundary.                                                   //
+//                                                                       //
+///////////////////////////////////////////////////////////////////////////
+
+{
+    double answer;
+
+    answer = pow(M_E, -(y + 1));
+
+    return answer;
+}
+
+double RHSofPDE(double x, double y)
+
+///////////////////////////////////////////////////////////////////////////
+//                                                                       //
+// Here's an example of a user-defined function for the RHS of the PDE.  //
+//                                                                       //
+///////////////////////////////////////////////////////////////////////////
+
+{
+    double answer;
+
+    answer = 2 * pow(M_E, -(x + y));
+
+    return answer;
+}
+
+double u(double x, double y)
+
+///////////////////////////////////////////////////////////////////////////
+//                                                                       //
+// Here's an example of a user-defined function for the analytical soln. //
+//                                                                       //
+///////////////////////////////////////////////////////////////////////////
+
+{
+    double answer;
+
+    answer = pow(M_E, -(x + y));
+
+    return answer;
+}
+
+void printPlottingData(ofstream *ptr_plotFile, double ybottom, double h, 
+                       int NY, double Uconverged[NXmaxp1][NYmaxp1], 
+                       double xstar, int istar)
+
+///////////////////////////////////////////////////////////////////////////
+//                                                                       //
+// This function prints the plotting data table.  Variables in the arg   //
+// list have the following meanings.                                     //
+//                                                                       //
+// ptr_plotFile:          Pointer to the plotting data file              //
+// ybottom:               y value at bottom boundary                     //
+// h:                     Grid spacing in x and y directions             //
+// NY:                    One less than the number of y points           //
+// Uconverged:            Entries [0:NX, 0:NY] are the converged         //
+//                            numerical solution                         //
+// xstar:                 x value at which U, u, and |e| will be output  //
+// istar:                 i value corresponding to xstar                 //
+//                                                                       //
+// All variables in the arg list are INPUTs.                             //
+//                                                                       //
+///////////////////////////////////////////////////////////////////////////
+
+{
+    // Declare some variables.
+    int j;
+    double y;
+    double uactual, error;
+
+    // Print a message to the screen.
+    cout << fixed << setprecision(4);
+    cout << "\n Converged solution at x = " << setw(6) << xstar << " is being printed"
+         << " to the plotting data file...\n\n";
+
+    // Print the title and the column headings for the plotting data table.
+    *ptr_plotFile   //<< fixed << setprecision(6)
+                    // << " CONVERGED SOLN AT x = " << setw(9) << xstar << "\n\n"
+                    << "          y                    U                    u                   |e|\n";
+
+    // Print a horizontal line below the column headings.
+    // *ptr_plotFile   << "--------------------------------------------------------------------"
+    //                 << "----------------\n";
+
+    // Prepare for the loop.
+    y = ybottom - h;
+
+    for (j=0; j<=NY; j++)
+    {
+         y += h;
+         uactual = u(xstar, y);
+         error = uactual - Uconverged[istar][j];
+
+        // Print one row of the plotting data table.
+        *ptr_plotFile   << scientific << setprecision(12)
+                        << " "  << setw(19) << y
+                        << "  " << setw(19) << Uconverged[istar][j]
+                        << "  " << setw(19) << uactual
+                        << "  " << setw(19) << fabs(error) << endl;
+    }
+
+    // Print another horizontal line.
+    // *ptr_plotFile   << "--------------------------------------------------------------------"
+    //                 << "----------------\n";
+
+    return;
+}
