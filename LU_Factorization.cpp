@@ -121,13 +121,13 @@ vector<vector<double>> LU_partial_pivoting(vector<vector<double>> matrix)
      for (int k = 0; k < n - 1; k++)
      {
           pivot_row = k;
-          pivot = abs(matrix[k][k]);
+          pivot = fabs(matrix[k][k]);
           for (int j = k + 1; j < n; j++)
           {
-               if (abs(matrix[j][k]) > pivot)
+               if (fabs(matrix[j][k]) > pivot)
                     {
                          pivot_row = j;
-                         pivot = abs(matrix[j][k]);
+                         pivot = fabs(matrix[j][k]);
                     }
           }
 
@@ -162,11 +162,6 @@ vector<vector<double>> LU_complete_pivoting(vector<vector<double>> matrix)
      vector<vector<double>> IdentityRow(n, vector<double>(n, 0.0));
      vector<vector<double>> IdentityColumn(n, vector<double>(n, 0.0));
 
-     double mult_ik;
-     int pivot_row;
-     double pivot_row_value;
-     int pivot_column;
-     double pivot_column_value;
      for (int i = 0; i < n; i++)
      {
           LowerTriangle[i][i] = 1.0;
@@ -176,53 +171,46 @@ vector<vector<double>> LU_complete_pivoting(vector<vector<double>> matrix)
 
      for (int k = 0; k < n - 1; k++)
      {
-          pivot_row = k;
-          pivot_row_value = abs(matrix[k][k]);
-          for (int j = k + 1; j < n; j++)
+          // Search the whole remaining submatrix for the largest entry
+          int pivot_row = k, pivot_column = k;
+          double max_val = std::abs(matrix[k][k]);
+          for (int i = k; i < n; i++)
           {
-               if (abs(matrix[j][k]) > pivot_row_value)
+               for (int j = k; j < n; j++)
                {
-                    pivot_row = j;
-                    pivot_row_value = abs(matrix[j][k]);
+                    if (std::abs(matrix[i][j]) > max_val)
+                    {
+                         max_val = std::abs(matrix[i][j]);
+                         pivot_row = i;
+                         pivot_column = j;
+                    }
                }
           }
+
+          if (max_val == 0.0) // remaining submatrix is all zeros -> singular
+               break;
 
           swapRows(matrix, pivot_row, k);
           swapRows(IdentityRow, pivot_row, k);
-
           for (int i = 0; i < k; i++)
-          {
-               double temp = LowerTriangle[pivot_row][i];
-               LowerTriangle[pivot_row][i] = LowerTriangle[k][i];
-               LowerTriangle[k][i] = temp;
-          }
-
-          pivot_column = k;
-          pivot_column_value = abs(matrix[k][k]);
-          for (int j = k + 1; j < n; j++)
-          {
-               if (abs(matrix[k][j]) > pivot_column_value)
-               {
-                    pivot_column = j;
-                    pivot_column_value = abs(matrix[j][k]);
-               }
-          }
+               std::swap(LowerTriangle[pivot_row][i], LowerTriangle[k][i]);
 
           swapColumns(matrix, pivot_column, k);
           swapColumns(IdentityColumn, pivot_column, k);
 
           for (int j = k + 1; j < n; j++)
           {
-               mult_ik = matrix[j][k] / matrix[k][k];
+               double mult = matrix[j][k] / matrix[k][k];
                matrix[j][k] = 0;
-               LowerTriangle[j][k] = mult_ik;
+               LowerTriangle[j][k] = mult;
                for (int i = k + 1; i < n; i++)
-               {
-                    matrix[j][i] = matrix[j][i] - mult_ik * matrix[k][i];
-               }
+                    matrix[j][i] -= mult * matrix[k][i];
           }
      }
-     return matrixMultiply(matrixMultiply(transpose(IdentityRow), matrixMultiply(LowerTriangle, matrix)), transpose(IdentityColumn));
+
+     return matrixMultiply(
+         matrixMultiply(transpose(IdentityRow), matrixMultiply(LowerTriangle, matrix)),
+         transpose(IdentityColumn));
 }
 
 vector<vector<double>> subtractMatrices(
@@ -250,7 +238,7 @@ double FrobeniusNorm(vector<vector<double>> matrix)
      {
           for (int j = 0; j < n; j++)
           {
-               result += abs(matrix[i][j]) * abs(matrix[i][j]);
+               result += fabs(matrix[i][j]) * fabs(matrix[i][j]);
           }
      }
      return pow(result, 0.5);
